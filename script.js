@@ -127,7 +127,8 @@ function setup() {
 
         /** @override */
         static defaultUniforms = {
-            alphaThreshold: 0.60,
+            alphaScale: 1,
+            alphaThreshold: 0.6,
             outlineColor: [1, 1, 1, 1],
             thickness: 1
         };
@@ -158,10 +159,11 @@ function setup() {
                 uniform vec4 inputClamp;
                 uniform vec4 outlineColor;
                 uniform float thickness;
+                uniform float alphaScale;
                 uniform float alphaThreshold;
 
                 float sampleAlpha(vec2 textureCoord) {
-                    return smoothstep(alphaThreshold, 1.0, texture2D(uSampler, clamp(textureCoord, inputClamp.xy, inputClamp.zw)).a);
+                    return smoothstep(alphaThreshold, 1.0, alphaScale * texture2D(uSampler, clamp(textureCoord, inputClamp.xy, inputClamp.zw)).a);
                 }
 
                 void main(void) {
@@ -196,15 +198,47 @@ function setup() {
         }
 
         /** @override */
+        static create(uniforms) {
+            const shader = super.create(uniforms);
+
+            shader.#updatePadding();
+
+            return shader;
+        }
+
+        #updatePadding() {
+            this.padding = this.uniforms.thickness;
+        }
+
+        /**
+         * The thickness of the outline.
+         * @returns {number}
+         */
+        get thickness() {
+            return this.uniforms.thickness;
+        }
+
+        set thickness(value) {
+            this.uniforms.thickness = value;
+            this.#updatePadding();
+        }
+
+        /** @override */
         get autoFit() {
-            return this.thickness <= 1;
+            return this.uniforms.thickness <= 1;
         }
 
         set autoFit(value) { }
+
+        /** @override */
+        apply(filterManager, input, output, clear, currentState) {
+            this.uniforms.alphaScale = 1 / (currentState.target.worldAlpha || 1);
+            filterManager.applyFilter(this, input, output, clear);
+        }
     }
 
-    Hooks.on("canvasPan", () => {
-        GMVisionDetectionFilter.instance.uniforms.thickness = Math.max(2 * Math.abs(canvas.stage.scale.x), 1);
+    Hooks.on("canvasPan", (canvas, constrained) => {
+        GMVisionDetectionFilter.instance.thickness = Math.max(2 * Math.abs(constrained.scale), 1);
     });
 
     VisualEffectsMaskingFilter.defaultUniforms.gmVision = false;
