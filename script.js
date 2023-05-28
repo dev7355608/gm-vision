@@ -82,21 +82,19 @@ Hooks.once("init", () => {
 
         libWrapper.register(
             "gm-vision",
-            "CanvasVisibility.prototype.testVisibility",
-            function (wrapped, point, options = {}) {
-                const result = wrapped(point, options);
-                const object = options.object;
+            "Token.prototype.isVisible",
+            function (wrapped) {
+                this.detectionFilter = undefined;
+                this.gmVisible = false;
 
-                if (!(object instanceof Token)) {
-                    return result;
+                const visible = wrapped();
+
+                if (active && !visible || this.document.hidden && canvas.effects.visionSources.some(s => s.active)) {
+                    this.detectionFilter = GMVisionDetectionFilter.instance;
+                    this.gmVisible = true;
                 }
 
-                if (active && !result || object.document.hidden && canvas.effects.visionSources.size) {
-                    object.gmVisible = true;
-                    object.detectionFilter = GMVisionDetectionFilter.instance;
-                }
-
-                return result || active;
+                return visible || active;
             },
             libWrapper.WRAPPER,
             { perf_mode: libWrapper.PERF_FAST }
