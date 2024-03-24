@@ -79,60 +79,46 @@ Hooks.once("init", () => {
             canvas.effects.illumination.filter.uniforms.gmVision = active;
         });
 
-        libWrapper.register(
-            "gm-vision",
-            "CanvasVisibility.prototype.restrictVisibility",
-            function (wrapped) {
-                for (const token of canvas.tokens.placeables) {
-                    token.gmVisible = false;
-                }
+        if (foundry.utils.isNewerVersion(11, game.version)) {
+            libWrapper.register(
+                "gm-vision",
+                "CanvasVisibility.prototype.restrictVisibility",
+                function (wrapped) {
+                    for (const token of canvas.tokens.placeables) {
+                        token.gmVisible = false;
+                    }
 
-                return wrapped();
-            },
-            libWrapper.WRAPPER,
-            { perf_mode: libWrapper.PERF_FAST }
-        );
+                    return wrapped();
+                },
+                libWrapper.WRAPPER,
+                { perf_mode: libWrapper.PERF_FAST }
+            );
+        }
 
         libWrapper.register(
             "gm-vision",
             "Token.prototype.isVisible",
             function (wrapped) {
                 this.detectionFilter = undefined;
-                this.gmVisible = false;
 
                 const visible = wrapped();
 
-                if (active && !visible || this.document.hidden && canvas.effects.visionSources.some(s => s.active)) {
-                    this.detectionFilter = GMVisionDetectionFilter.instance;
+                if (!visible && active || visible && this.document.hidden) {
+                    this.detectionFilter = filter;
                     this.gmVisible = true;
+
+                    return true;
                 }
 
-                return visible || active;
+                this.gmVisible = false;
+
+                return visible;
             },
             libWrapper.WRAPPER,
             { perf_mode: libWrapper.PERF_FAST }
         );
 
         class GMVisionDetectionFilter extends AbstractBaseFilter {
-            /** @type {GMVisionDetectionFilter} */
-            static #instance;
-
-            /**
-             * The instance of this shader.
-             * @type {GMVisionDetectionFilter}
-             */
-            static get instance() {
-                return this.#instance ??= this.create();
-            }
-
-            /** @override */
-            static defaultUniforms = {
-                alphaScale: 1,
-                alphaThreshold: 0.6,
-                outlineColor: [1, 1, 1, 1],
-                thickness: 1
-            };
-
             /** @override */
             static vertexShader = `\
                 attribute vec2 aVertexPosition;
@@ -140,105 +126,53 @@ Hooks.once("init", () => {
                 uniform vec4 inputSize;
                 uniform vec4 outputFrame;
                 uniform mat3 projectionMatrix;
+                uniform vec2 origin;
+                uniform mediump float thickness;
 
                 varying vec2 vTextureCoord;
+                varying float vOffset;
 
                 void main() {
-                    vTextureCoord = aVertexPosition * (outputFrame.zw * inputSize.zw);
-                    vec2 position = aVertexPosition * max(outputFrame.zw, vec2(0.)) + outputFrame.xy;
+                    vTextureCoord = (aVertexPosition * outputFrame.zw) * inputSize.zw;
+                    vec2 position = aVertexPosition * max(outputFrame.zw, vec2(0.0)) + outputFrame.xy;
+                    vec2 offset = position - origin;
+                    vOffset = (offset.x + offset.y) / (2.0 * thickness);
                     gl_Position = vec4((projectionMatrix * vec3(position, 1.0)).xy, 0.0, 1.0);
-                }`;
-
-            /** @override */
-            static get fragmentShader() {
-                return `\
-                    varying vec2 vTextureCoord;
-
-                    uniform sampler2D uSampler;
-                    uniform vec4 inputPixel;
-                    uniform vec4 inputClamp;
-                    uniform vec4 outlineColor;
-                    uniform float thickness;
-                    uniform float alphaScale;
-                    uniform float alphaThreshold;
-
-                    float sampleAlpha(vec2 textureCoord) {
-                        return smoothstep(alphaThreshold, 1.0, alphaScale * texture2D(uSampler, clamp(textureCoord, inputClamp.xy, inputClamp.zw)).a);
-                    }
-
-                    void main(void) {
-                        float innerAlpha = sampleAlpha(vTextureCoord);
-                        float outerAlpha = innerAlpha;
-
-                        for (float angle = 0.0; angle < ${(2 * Math.PI - this.#quality / 2).toFixed(7)}; angle += ${this.#quality.toFixed(7)}) {
-                            vec2 offset = inputPixel.zw * vec2(cos(angle), sin(angle)) * thickness;
-                            outerAlpha = max(outerAlpha, sampleAlpha(vTextureCoord + offset));
-                        }
-
-                        vec2 pixelCoord = vTextureCoord * inputPixel.xy;
-                        float hatchAlpha = thickness > 1.0 ? smoothstep(0.0, 1.0, sin(2.2214415 / thickness * (pixelCoord.x + pixelCoord.y)) + 0.5) : 0.5;
-
-                        gl_FragColor = outlineColor * (max((1.0 - innerAlpha) * outerAlpha, innerAlpha * hatchAlpha * 0.5) * 0.5);
-                    }`;
-            }
-
-            /**
-             * Quality of the outline according to performance mode.
-             * @returns {number}
-             */
-            static get #quality() {
-                switch (canvas.performance.mode) {
-                    case CONST.CANVAS_PERFORMANCE_MODES.LOW:
-                        return (Math.PI * 2) / 8;
-                    case CONST.CANVAS_PERFORMANCE_MODES.MED:
-                        return (Math.PI * 2) / 12;
-                    default:
-                        return (Math.PI * 2) / 16;
                 }
-            }
+            `;
 
             /** @override */
-            static create(uniforms) {
-                const shader = super.create(uniforms);
+            static fragmentShader = `\
+                varying vec2 vTextureCoord;
+                varying float vOffset;
 
-                shader.#updatePadding();
+                uniform sampler2D uSampler;
+                uniform mediump float thickness;
 
-                return shader;
-            }
-
-            #updatePadding() {
-                this.padding = this.uniforms.thickness;
-            }
-
-            /**
-             * The thickness of the outline.
-             * @returns {number}
-             */
-            get thickness() {
-                return this.uniforms.thickness;
-            }
-
-            set thickness(value) {
-                this.uniforms.thickness = value;
-                this.#updatePadding();
-            }
+                void main() {
+                    float x = abs(vOffset - floor(vOffset + 0.5)) * 2.0;
+                    float y0 = clamp((x + 0.5) * thickness + 0.5, 0.0, 1.0);
+                    float y1 = clamp((x - 0.5) * thickness + 0.5, 0.0, 1.0);
+                    float y = y0 - y1;
+                    float alpha = texture2D(uSampler, vTextureCoord).a * 0.25;
+                    gl_FragColor = vec4(y, y, y, 1.0) * alpha;
+                }
+            `;
 
             /** @override */
-            get autoFit() {
-                return this.uniforms.thickness <= 1;
-            }
-
-            set autoFit(value) { }
-
-            /** @override */
-            apply(filterManager, input, output, clear, currentState) {
-                this.uniforms.alphaScale = 1 / (currentState.target.worldAlpha || 1);
-                filterManager.applyFilter(this, input, output, clear);
-            }
+            static defaultUniforms = {
+                origin: { x: 0, y: 0 },
+                thickness: 1
+            };
         }
 
-        Hooks.on("canvasPan", (canvas, constrained) => {
-            GMVisionDetectionFilter.instance.thickness = Math.max(2 * Math.abs(constrained.scale), 1);
+        const filter = GMVisionDetectionFilter.create();
+
+        Hooks.on("canvasPan", (canvas, { x, y, scale }) => {
+            const { width, height } = canvas.app.screen;
+            filter.uniforms.origin.x = width / 2 - x * scale;
+            filter.uniforms.origin.y = height / 2 - y * scale;
+            filter.uniforms.thickness = (canvas.dimensions.size / 25) * scale;
         });
 
         VisualEffectsMaskingFilter.defaultUniforms.gmVision = false;
