@@ -52,6 +52,19 @@ Hooks.once("init", () => {
             lighting.icon = active ? "fa-solid fa-lightbulb" : "fa-regular fa-lightbulb";
         });
 
+        Hooks.on("renderSceneControls", (app, html) => {
+            const lighting = html[0].querySelector(`.scene-control[data-control="lighting"]`);
+
+            if (!lighting) {
+                return;
+            }
+
+            lighting.addEventListener("contextmenu", (event) => {
+                event.preventDefault();
+                game.settings.set("gm-vision", "active", !active);
+            });
+        });
+
         Hooks.on("drawCanvasVisibility", layer => {
             layer.gmVision = layer.addChild(
                 new PIXI.LegacyGraphics()

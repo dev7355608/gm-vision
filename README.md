@@ -6,6 +6,7 @@
 # GM Vision (Foundry VTT Module)
 
 This module adds a toggleable mode for GMs that ...
+
 - increases the brightness of the scene,
 - reveals the fog of war, and
 - shows all tokens even if they wouldn't be visible normally from the perspective of the selected token.
@@ -14,4 +15,4 @@ Tokens that wouldn't be visible normally are highlighted by a hatched overlay.
 
 ![demo](demo.png)
 
-The mode is toggled by a keybinding (default: `CTRL+G`). The light bulb icon of the lighting controls button indicates whether it's active (<img src="https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.x/svgs/regular/lightbulb.svg" width="16px" height="16px" style="filter: invert(100%);">: inactive; <img src="https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.x/svgs/solid/lightbulb.svg" width="16px" height="16px" style="filter: invert(100%);">: active).
+The mode is toggled by a keybinding (default: `CTRL+G`) or by right-clicking the lighting controls button. The light bulb icon of this button indicates whether it's active (<img src="https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.x/svgs/regular/lightbulb.svg" width="16px" height="16px" style="filter: invert(100%);">: inactive; <img src="https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.x/svgs/solid/lightbulb.svg" width="16px" height="16px" style="filter: invert(100%);">: active).
