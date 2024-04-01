@@ -13,7 +13,13 @@ Hooks.once("init", () => {
             }
 
             active = value;
-            canvas.perception.update({ refreshVision: true }, true);
+
+            if (foundry.utils.isNewerVersion(game.version, 12)) {
+                canvas.perception.update({ refreshVision: true });
+            } else {
+                canvas.perception.update({ refreshVision: true }, true);
+            }
+
             ui.controls.initialize();
         }
     });
@@ -59,66 +65,47 @@ Hooks.once("init", () => {
                 return;
             }
 
-            lighting.addEventListener("contextmenu", (event) => {
+            lighting.addEventListener("contextmenu", event => {
                 event.preventDefault();
                 game.settings.set("gm-vision", "active", !active);
             });
         });
 
+        let revealFog;
+
         Hooks.on("drawCanvasVisibility", layer => {
-            layer.gmVision = layer.addChild(
+            revealFog = layer.addChild(
                 new PIXI.LegacyGraphics()
                     .beginFill(0xFFFFFF)
-                    .drawShape(canvas.dimensions.rect.clone())
+                    .drawShape(canvas.dimensions.rect)
                     .endFill());
-            layer.gmVision.visible = false;
+            revealFog.visible = false;
         });
 
-        Hooks.on("sightRefresh", layer => {
-            layer.gmVision.visible = active;
+        Hooks.on("sightRefresh", () => {
+            revealFog.visible = active;
             canvas.effects.illumination.filter.uniforms.gmVision = active;
         });
 
-        if (foundry.utils.isNewerVersion(11, game.version)) {
-            libWrapper.register(
-                "gm-vision",
-                "CanvasVisibility.prototype.restrictVisibility",
-                function (wrapped) {
-                    for (const token of canvas.tokens.placeables) {
-                        token.gmVisible = false;
-                    }
-
-                    return wrapped();
-                },
-                libWrapper.WRAPPER,
-                { perf_mode: libWrapper.PERF_FAST }
-            );
-        }
-
-        libWrapper.register(
-            "gm-vision",
-            "Token.prototype.isVisible",
-            function (wrapped) {
+        CONFIG.Token.objectClass = class extends CONFIG.Token.objectClass {
+            /** @override */
+            get isVisible() {
+                // Fixes #9521 in V10
                 this.detectionFilter = undefined;
 
-                const visible = wrapped();
+                const visible = super.isVisible;
 
                 if (!visible && active || visible && this.document.hidden) {
-                    this.detectionFilter = filter;
-                    this.gmVisible = true;
+                    this.detectionFilter = hatchFilter;
 
                     return true;
                 }
 
-                this.gmVisible = false;
-
                 return visible;
-            },
-            libWrapper.WRAPPER,
-            { perf_mode: libWrapper.PERF_FAST }
-        );
+            }
+        };
 
-        class GMVisionDetectionFilter extends AbstractBaseFilter {
+        class HatchFilter extends AbstractBaseFilter {
             /** @override */
             static vertexShader = `\
                 attribute vec2 aVertexPosition;
@@ -164,16 +151,21 @@ Hooks.once("init", () => {
                 origin: { x: 0, y: 0 },
                 thickness: 1
             };
+
+            /** @override */
+            apply(filterManager, input, output, clearMode, currentState) {
+                const uniforms = this.uniforms;
+                const worldTransform = currentState.target.worldTransform;
+
+                uniforms.origin.x = worldTransform.tx;
+                uniforms.origin.y = worldTransform.ty;
+                uniforms.thickness = canvas.dimensions.size / 25 * canvas.stage.scale.x;
+
+                super.apply(filterManager, input, output, clearMode, currentState);
+            }
         }
 
-        const filter = GMVisionDetectionFilter.create();
-
-        Hooks.on("canvasPan", (canvas, { x, y, scale }) => {
-            const { width, height } = canvas.app.screen;
-            filter.uniforms.origin.x = width / 2 - x * scale;
-            filter.uniforms.origin.y = height / 2 - y * scale;
-            filter.uniforms.thickness = (canvas.dimensions.size / 25) * scale;
-        });
+        const hatchFilter = HatchFilter.create();
 
         VisualEffectsMaskingFilter.defaultUniforms.gmVision = false;
         VisualEffectsMaskingFilter.POST_PROCESS_TECHNIQUES.GM_VISION = {
@@ -181,33 +173,23 @@ Hooks.once("init", () => {
             glsl: `if (gmVision) finalColor.rgb = sqrt(finalColor.rgb) * 0.5 + 0.5;`
         };
 
-        libWrapper.register(
-            "gm-vision",
-            "VisualEffectsMaskingFilter.fragmentHeader",
-            function (wrapped, filterMode) {
-                let header = wrapped(filterMode);
+        VisualEffectsMaskingFilter.fragmentHeader = (wrapped => function (filterMode) {
+            let header = wrapped.call(this, filterMode);
 
-                if (filterMode === VisualEffectsMaskingFilter.FILTER_MODES.ILLUMINATION) {
-                    header += "\nuniform bool gmVision;\n";
-                }
+            if (filterMode === VisualEffectsMaskingFilter.FILTER_MODES.ILLUMINATION) {
+                header += "\nuniform bool gmVision;\n";
+            }
 
-                return header;
-            },
-            libWrapper.WRAPPER
-        );
+            return header;
+        })(VisualEffectsMaskingFilter.fragmentHeader);
 
-        libWrapper.register(
-            "gm-vision",
-            "VisualEffectsMaskingFilter.fragmentShader",
-            function (wrapped, filterMode, postProcessModes = []) {
-                if (filterMode === VisualEffectsMaskingFilter.FILTER_MODES.ILLUMINATION) {
-                    postProcessModes = [...postProcessModes, "GM_VISION"];
-                }
+        VisualEffectsMaskingFilter.fragmentShader = (wrapped => function (filterMode, postProcessModes = []) {
+            if (filterMode === VisualEffectsMaskingFilter.FILTER_MODES.ILLUMINATION) {
+                postProcessModes = [...postProcessModes, "GM_VISION"];
+            }
 
-                return wrapped(filterMode, postProcessModes);
-            },
-            libWrapper.WRAPPER
-        );
+            return wrapped.call(this, filterMode, postProcessModes);
+        })(VisualEffectsMaskingFilter.fragmentShader);
     };
 
     if (foundry.utils.isNewerVersion(game.version, 11)) {
