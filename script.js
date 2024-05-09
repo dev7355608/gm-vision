@@ -167,29 +167,70 @@ Hooks.once("init", () => {
 
         const hatchFilter = HatchFilter.create();
 
-        VisualEffectsMaskingFilter.defaultUniforms.gmVision = false;
-        VisualEffectsMaskingFilter.POST_PROCESS_TECHNIQUES.GM_VISION = {
-            id: "GM_VISION",
-            glsl: `if (gmVision) finalColor.rgb = sqrt(finalColor.rgb) * 0.5 + 0.5;`
-        };
+        if (foundry.utils.isNewerVersion(game.version, 12)) {
+            Hooks.on("drawCanvasDarknessEffects", (layer) => {
+                const index = layer.filters?.indexOf(layer.filter);
 
-        VisualEffectsMaskingFilter.fragmentHeader = (wrapped => function (filterMode) {
-            let header = wrapped.call(this, filterMode);
+                layer.filter = new PIXI.AlphaFilter();
 
-            if (filterMode === VisualEffectsMaskingFilter.FILTER_MODES.ILLUMINATION) {
-                header += "\nuniform bool gmVision;\n";
-            }
+                if (index >= 0) {
+                    layer.filters[index] = layer.filter;
+                }
+            });
 
-            return header;
-        })(VisualEffectsMaskingFilter.fragmentHeader);
+            Hooks.on("sightRefresh", () => {
+                canvas.effects.darkness.filter.alpha = active ? 0.5 : 1;
+            });
 
-        VisualEffectsMaskingFilter.fragmentShader = (wrapped => function (filterMode, postProcessModes = []) {
-            if (filterMode === VisualEffectsMaskingFilter.FILTER_MODES.ILLUMINATION) {
-                postProcessModes = [...postProcessModes, "GM_VISION"];
-            }
+            CONFIG.Canvas.visualEffectsMaskingFilter = class extends CONFIG.Canvas.visualEffectsMaskingFilter {
+                /** @override */
+                static defaultUniforms = {
+                    ...super.defaultUniforms,
+                    gmVision: false
+                };
 
-            return wrapped.call(this, filterMode, postProcessModes);
-        })(VisualEffectsMaskingFilter.fragmentShader);
+                /** @override */
+                static fragmentHeader = `
+                    ${super.fragmentHeader}
+                    uniform bool gmVision;
+                `;
+
+                /** @override */
+                static fragmentPostProcess(postProcessModes) {
+                    return `
+                        ${super.fragmentPostProcess(postProcessModes)}
+
+                        if (mode == ${this.FILTER_MODES.ILLUMINATION} && gmVision) {
+                            finalColor.rgb = sqrt(finalColor.rgb) * 0.5 + 0.5;
+                        }
+                    `;
+                }
+            };
+        } else {
+            VisualEffectsMaskingFilter.defaultUniforms.gmVision = false;
+            VisualEffectsMaskingFilter.POST_PROCESS_TECHNIQUES.GM_VISION = {
+                id: "GM_VISION",
+                glsl: `if (gmVision) finalColor.rgb = sqrt(finalColor.rgb) * 0.5 + 0.5;`
+            };
+
+            VisualEffectsMaskingFilter.fragmentHeader = (wrapped => function (filterMode) {
+                let header = wrapped.call(this, filterMode);
+
+                if (filterMode === VisualEffectsMaskingFilter.FILTER_MODES.ILLUMINATION) {
+                    header += "\nuniform bool gmVision;\n";
+                }
+
+                return header;
+            })(VisualEffectsMaskingFilter.fragmentHeader);
+
+            VisualEffectsMaskingFilter.fragmentShader = (wrapped => function (filterMode, postProcessModes = []) {
+                if (filterMode === VisualEffectsMaskingFilter.FILTER_MODES.ILLUMINATION) {
+                    postProcessModes = [...postProcessModes, "GM_VISION"];
+                }
+
+                return wrapped.call(this, filterMode, postProcessModes);
+            })(VisualEffectsMaskingFilter.fragmentShader);
+        }
     };
 
     if (foundry.utils.isNewerVersion(game.version, 11)) {
