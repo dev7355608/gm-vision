@@ -14,7 +14,7 @@ Hooks.once("init", () => {
 
             active = value;
 
-            if (foundry.utils.isNewerVersion(game.version, 12)) {
+            if (game.release.generation >= 12) {
                 canvas.perception.update({ refreshVision: true });
             } else {
                 canvas.perception.update({ refreshVision: true }, true);
@@ -90,9 +90,6 @@ Hooks.once("init", () => {
         CONFIG.Token.objectClass = class extends CONFIG.Token.objectClass {
             /** @override */
             get isVisible() {
-                // Fixes #9521 in V10
-                this.detectionFilter = undefined;
-
                 const visible = super.isVisible;
 
                 if (!visible && active || visible && this.document.hidden) {
@@ -123,7 +120,7 @@ Hooks.once("init", () => {
                     vTextureCoord = (aVertexPosition * outputFrame.zw) * inputSize.zw;
                     vec2 position = aVertexPosition * max(outputFrame.zw, vec2(0.0)) + outputFrame.xy;
                     vec2 offset = position - origin;
-                    vOffset = (offset.x + offset.y) / (2.0 * thickness);
+                    vOffset = (offset.x + offset.y) / (1.414213562373095 * 2.0 * thickness);
                     gl_Position = vec4((projectionMatrix * vec3(position, 1.0)).xy, 0.0, 1.0);
                 }
             `;
@@ -167,7 +164,7 @@ Hooks.once("init", () => {
 
         const hatchFilter = HatchFilter.create();
 
-        if (foundry.utils.isNewerVersion(game.version, 12)) {
+        if (game.release.generation >= 12) {
             Hooks.on("drawCanvasDarknessEffects", (layer) => {
                 const index = layer.filters?.indexOf(layer.filter);
 
@@ -233,7 +230,7 @@ Hooks.once("init", () => {
         }
     };
 
-    if (foundry.utils.isNewerVersion(game.version, 11)) {
+    if (game.release.generation >= 11) {
         Hooks.once("setup", setup);
     } else {
         Hooks.once("setup", () => {
