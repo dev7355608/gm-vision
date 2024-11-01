@@ -2,32 +2,26 @@ Hooks.once("init", () => {
     let active = false;
 
     game.settings.register("gm-vision", "active", {
-        name: "GM Vision",
         scope: "client",
         config: false,
         type: Boolean,
         default: false,
-        onChange: value => {
+        onChange: (value) => {
             if (!game.user.isGM || game.settings.get("core", "noCanvas")) {
                 return;
             }
 
             active = value;
 
-            if (game.release.generation >= 12) {
-                canvas.perception.update({ refreshVision: true });
-            } else {
-                canvas.perception.update({ refreshVision: true }, true);
-            }
-
-            ui.controls.initialize();
-        }
+            canvas.perception.update({ refreshVision: true });
+            ui.controls.render();
+        },
     });
 
     game.keybindings.register("gm-vision", "active", {
         name: "Toggle GM Vision",
         editable: [
-            { key: "KeyG", modifiers: [KeyboardManager.MODIFIER_KEYS.CONTROL] }
+            { key: "KeyG", modifiers: [game.keyboard.constructor.MODIFIER_KEYS.CONTROL] },
         ],
         restricted: true,
         onDown: () => {
@@ -38,42 +32,39 @@ Hooks.once("init", () => {
             game.settings.set("gm-vision", "active", !active);
 
             return true;
-        }
+        },
     });
 
-    function setup() {
+    Hooks.once("setup", () => {
         if (!game.user.isGM || game.settings.get("core", "noCanvas")) {
             return;
         }
 
         active = game.settings.get("gm-vision", "active");
 
-        Hooks.on("getSceneControlButtons", controls => {
-            const lighting = controls.find(c => c.name === "lighting");
-
-            if (!lighting) {
-                return;
-            }
-
-            lighting.icon = active ? "fa-solid fa-lightbulb" : "fa-regular fa-lightbulb";
-        });
-
         Hooks.on("renderSceneControls", (app, html) => {
-            const lighting = html[0].querySelector(`.scene-control[data-control="lighting"]`);
+            const lighting = html.querySelector(`[data-control="lighting"]`);
 
             if (!lighting) {
                 return;
             }
 
-            lighting.addEventListener("contextmenu", event => {
+            if (active) {
+                lighting.classList.replace("fa-regular", "fa-solid");
+            } else {
+                lighting.classList.replace("fa-solid", "fa-regular");
+            }
+
+            lighting.addEventListener("contextmenu", (event) => {
                 event.preventDefault();
+
                 game.settings.set("gm-vision", "active", !active);
             });
         });
 
         let revealFog;
 
-        Hooks.on("drawCanvasVisibility", layer => {
+        Hooks.on("drawCanvasVisibility", (layer) => {
             revealFog = layer.addChild(
                 new PIXI.LegacyGraphics()
                     .beginFill(0xFFFFFF)
@@ -82,27 +73,23 @@ Hooks.once("init", () => {
             revealFog.visible = false;
         });
 
+        Hooks.on("drawCanvasDarknessEffects", (layer) => {
+            const index = layer.filters?.indexOf(layer.filter);
+
+            layer.filter = new PIXI.AlphaFilter();
+
+            if (index >= 0) {
+                layer.filters[index] = layer.filter;
+            }
+        });
+
         Hooks.on("sightRefresh", () => {
             revealFog.visible = active;
             canvas.effects.illumination.filter.uniforms.gmVision = active;
+            canvas.effects.darkness.filter.alpha = active ? 0.5 : 1;
         });
 
-        CONFIG.Token.objectClass = class extends CONFIG.Token.objectClass {
-            /** @override */
-            get isVisible() {
-                const visible = super.isVisible;
-
-                if (!visible && active || visible && this.document.hidden) {
-                    this.detectionFilter = hatchFilter;
-
-                    return true;
-                }
-
-                return visible;
-            }
-        };
-
-        class HatchFilter extends AbstractBaseFilter {
+        class HatchFilter extends foundry.canvas.rendering.filters.AbstractBaseFilter {
             /** @override */
             static vertexShader = `\
                 attribute vec2 aVertexPosition;
@@ -146,7 +133,7 @@ Hooks.once("init", () => {
             /** @override */
             static defaultUniforms = {
                 origin: { x: 0, y: 0 },
-                thickness: 1
+                thickness: 1,
             };
 
             /** @override */
@@ -164,79 +151,45 @@ Hooks.once("init", () => {
 
         const hatchFilter = HatchFilter.create();
 
-        if (game.release.generation >= 12) {
-            Hooks.on("drawCanvasDarknessEffects", (layer) => {
-                const index = layer.filters?.indexOf(layer.filter);
+        CONFIG.Token.objectClass = class extends CONFIG.Token.objectClass {
+            /** @override */
+            get isVisible() {
+                const visible = super.isVisible;
 
-                layer.filter = new PIXI.AlphaFilter();
+                if (!visible && active || visible && this.document.hidden) {
+                    this.detectionFilter = hatchFilter;
 
-                if (index >= 0) {
-                    layer.filters[index] = layer.filter;
+                    return true;
                 }
-            });
 
-            Hooks.on("sightRefresh", () => {
-                canvas.effects.darkness.filter.alpha = active ? 0.5 : 1;
-            });
+                return visible;
+            }
+        };
 
-            CONFIG.Canvas.visualEffectsMaskingFilter = class extends CONFIG.Canvas.visualEffectsMaskingFilter {
-                /** @override */
-                static defaultUniforms = {
-                    ...super.defaultUniforms,
-                    gmVision: false
-                };
+        CONFIG.Canvas.visualEffectsMaskingFilter = class extends CONFIG.Canvas.visualEffectsMaskingFilter {
+            /** @override */
+            static defaultUniforms = {
+                ...super.defaultUniforms,
+                gmVision: false,
+            };
 
-                /** @override */
-                static fragmentHeader = `
+            /** @override */
+            static fragmentHeader = `
                     ${super.fragmentHeader}
+
                     uniform bool gmVision;
                 `;
 
-                /** @override */
-                static fragmentPostProcess(postProcessModes) {
-                    return `
+            /** @override */
+            static fragmentPostProcess(postProcessModes) {
+                return `
                         ${super.fragmentPostProcess(postProcessModes)}
 
                         if (mode == ${this.FILTER_MODES.ILLUMINATION} && gmVision) {
                             finalColor.rgb = sqrt(finalColor.rgb) * 0.5 + 0.5;
                         }
                     `;
-                }
-            };
-        } else {
-            VisualEffectsMaskingFilter.defaultUniforms.gmVision = false;
-            VisualEffectsMaskingFilter.POST_PROCESS_TECHNIQUES.GM_VISION = {
-                id: "GM_VISION",
-                glsl: `if (gmVision) finalColor.rgb = sqrt(finalColor.rgb) * 0.5 + 0.5;`
-            };
-
-            VisualEffectsMaskingFilter.fragmentHeader = (wrapped => function (filterMode) {
-                let header = wrapped.call(this, filterMode);
-
-                if (filterMode === VisualEffectsMaskingFilter.FILTER_MODES.ILLUMINATION) {
-                    header += "\nuniform bool gmVision;\n";
-                }
-
-                return header;
-            })(VisualEffectsMaskingFilter.fragmentHeader);
-
-            VisualEffectsMaskingFilter.fragmentShader = (wrapped => function (filterMode, postProcessModes = []) {
-                if (filterMode === VisualEffectsMaskingFilter.FILTER_MODES.ILLUMINATION) {
-                    postProcessModes = [...postProcessModes, "GM_VISION"];
-                }
-
-                return wrapped.call(this, filterMode, postProcessModes);
-            })(VisualEffectsMaskingFilter.fragmentShader);
-        }
-    };
-
-    if (game.release.generation >= 11) {
-        Hooks.once("setup", setup);
-    } else {
-        Hooks.once("setup", () => {
-            if (!game.settings.get("core", "noCanvas")) {
-                Hooks.once("canvasInit", setup);
             }
-        });
-    }
+        };
+    });
 });
