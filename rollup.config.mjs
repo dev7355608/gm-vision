@@ -70,6 +70,8 @@ export default {
                 archive.append(fs.createReadStream(name), { name });
             }
 
+            archive.directory("lang", "lang");
+
             archive.finalize();
         },
     }],
