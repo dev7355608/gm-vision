@@ -12,7 +12,8 @@ export default (Token) => class extends Token {
     get isVisible() {
         const visible = super.isVisible;
 
-        if (!visible && settings.active || visible && this.document.hidden) {
+        if (!visible && settings.active && (this._preview?.previewType !== "config") && !(this.layer.active
+            && this.document.visible && (ui.placeables?.isEntryVisible(this) === false)) || visible && this.document.hidden) {
             this.detectionFilter = detectionFilter ??= DetectionFilter.create();
 
             return true;
