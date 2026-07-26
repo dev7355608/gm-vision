@@ -12,10 +12,12 @@ export default (Token) => class extends Token {
     get isVisible() {
         const visible = super.isVisible;
 
-        if (!visible && settings.active && (this._preview?.previewType !== "config") && !(this.layer.active
-            && this.document.visible && (ui.placeables?.isEntryVisible(this) === false)) || visible && this.document.hidden) {
+        if (!visible || this.document.hidden) {
             this.detectionFilter = detectionFilter ??= DetectionFilter.create();
+        }
 
+        if (!visible && settings.active && this._preview?.previewType !== "config"
+            && canvas.effects.visionSources.some((s) => s.active) && !this.isFilteredOut && !this._testCulled?.()) {
             return true;
         }
 
